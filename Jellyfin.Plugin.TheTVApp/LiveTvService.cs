@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Web;
+
 namespace Jellyfin.Plugin.TheTVApp;
 
 using System;
@@ -29,6 +32,16 @@ public class LiveTvService : ILiveTvService
 {
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ILogger<LiveTvService> logger;
+    private readonly JsonSerializerOptions jsonSerializerOptions = new JsonSerializerOptions
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    // cache
+    private readonly SemaphoreSlim cacheLock = new SemaphoreSlim(1, 1);
+    private readonly TimeSpan cacheDuration = TimeSpan.FromMinutes(5);
+    private IEnumerable<TheTvAppChannel>? tvAppChannels;
+    private DateTime lastFetchTime = DateTime.MinValue;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LiveTvService"/> class.
@@ -41,7 +54,7 @@ public class LiveTvService : ILiveTvService
         this.httpClientFactory = httpClientFactory;
         this.logger = logger;
 
-        this.logger.LogInformation("TheTVApp LiveTvService initialized.");
+        this.logger.LogDebug("TheTVApp LiveTvService initialized.");
     }
 
     /// <inheritdoc />
@@ -59,14 +72,14 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public async Task<IEnumerable<ChannelInfo>> GetChannelsAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetChannelsAsync called.");
+        logger.LogDebug("GetChannelsAsync called.");
 
         var dedupedAppChannels = await this.GetTvAppChannelsAsync(cancellationToken).ConfigureAwait(false);
 
         // may want to cache here in the future
         var channelInfos = dedupedAppChannels.Select(channel => channel.ToChannelInfo());
 
-        logger.LogInformation("GetChannelsAsync returning: {0}", channelInfos);
+        logger.LogDebug("GetChannelsAsync returning: {0}", channelInfos);
 
         return channelInfos;
     }
@@ -74,7 +87,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public async Task<IEnumerable<ProgramInfo>> GetProgramsAsync(string channelId, DateTime startDateUtc, DateTime endDateUtc, CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetProgramsAsync called for channel {0}.", channelId);
+        logger.LogDebug("GetProgramsAsync called for channel {0}.", channelId);
 
         var dedupedAppChannels = await this.GetTvAppChannelsAsync(cancellationToken).ConfigureAwait(false);
         var channel = dedupedAppChannels.FirstOrDefault(channel => channel.Callsign == channelId);
@@ -84,20 +97,18 @@ public class LiveTvService : ILiveTvService
             return new List<ProgramInfo>();
         }
 
+        // filtering this is unnecessary because guide entries out crazy far aren't even returned in the guide
         var programs = channel.ToProgramInfos();
 
-        // filter to only those with an end date before the start date, and a start date before the end date
-        var programsOfInterest = programs.Where(program => program.StartDate < endDateUtc && program.EndDate > startDateUtc).ToList();
+        logger.LogDebug("GetProgramsAsync returning: {0}", programs);
 
-        logger.LogInformation("GetProgramsAsync returning: {0}", programsOfInterest);
-
-        return programsOfInterest;
+        return programs;
     }
 
     /// <inheritdoc />
     public async Task<MediaSourceInfo> GetChannelStream(string channelId, string streamId, CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetChannelStream called.");
+        logger.LogDebug("GetChannelStream called.");
 
         var mediaSourceStreams = await this.GetChannelStreamMediaSources(channelId, cancellationToken).ConfigureAwait(false);
         var mediaSource = mediaSourceStreams.FirstOrDefault(mediaSource => mediaSource.Id == streamId);
@@ -108,7 +119,7 @@ public class LiveTvService : ILiveTvService
             throw new ArgumentException("Stream not found.");
         }
 
-        logger.LogInformation("GetChannelStream returning: {0}", mediaSource);
+        logger.LogDebug("GetChannelStream returning: {0}", mediaSource);
 
         return mediaSource;
     }
@@ -116,7 +127,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public async Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(string channelId, CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetChannelStreamMediaSources called for channel ID {0}.", channelId);
+        logger.LogDebug("GetChannelStreamMediaSources called for channel ID {0}.", channelId);
 
         using (var httpClient = this.httpClientFactory.CreateClient())
         {
@@ -128,11 +139,11 @@ public class LiveTvService : ILiveTvService
                 return new List<MediaSourceInfo>();
             }
 
-            var mediaSources = await channel.ToMediaSourceInfosAsync(httpClient).ConfigureAwait(false);
+            var mediaSources = await channel.ToMediaSourceInfosAsync(this.logger, httpClient).ConfigureAwait(false);
 
             var mediaSourcesList = mediaSources.ToList();
 
-            logger.LogInformation("GetChannelStreamMediaSources returning: {0}", mediaSourcesList);
+            logger.LogDebug("GetChannelStreamMediaSources returning: {0}", mediaSourcesList);
 
             return mediaSourcesList;
         }
@@ -142,7 +153,7 @@ public class LiveTvService : ILiveTvService
     // DVR methods follow
     public Task CancelTimerAsync(string timerId, CancellationToken cancellationToken)
     {
-        logger.LogInformation("CancelTimerAsync called.");
+        logger.LogDebug("CancelTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -150,7 +161,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken)
     {
-        logger.LogInformation("CancelSeriesTimerAsync called.");
+        logger.LogDebug("CancelSeriesTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -158,7 +169,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task CreateTimerAsync(TimerInfo info, CancellationToken cancellationToken)
     {
-        logger.LogInformation("CreateTimerAsync called.");
+        logger.LogDebug("CreateTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -166,7 +177,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task CreateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
     {
-        logger.LogInformation("CreateSeriesTimerAsync called.");
+        logger.LogDebug("CreateSeriesTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -174,7 +185,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task UpdateTimerAsync(TimerInfo updatedTimer, CancellationToken cancellationToken)
     {
-        logger.LogInformation("UpdateTimerAsync called.");
+        logger.LogDebug("UpdateTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -182,7 +193,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task UpdateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
     {
-        logger.LogInformation("UpdateSeriesTimerAsync called.");
+        logger.LogDebug("UpdateSeriesTimerAsync called.");
 
         throw new NotImplementedException();
     }
@@ -190,7 +201,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task<IEnumerable<TimerInfo>> GetTimersAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetTimersAsync called.");
+        logger.LogDebug("GetTimersAsync called.");
 
         throw new NotImplementedException();
     }
@@ -198,7 +209,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task<SeriesTimerInfo> GetNewTimerDefaultsAsync(CancellationToken cancellationToken, ProgramInfo program)
     {
-        logger.LogInformation("GetNewTimerDefaultsAsync called.");
+        logger.LogDebug("GetNewTimerDefaultsAsync called.");
 
         throw new NotImplementedException();
     }
@@ -206,7 +217,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task<IEnumerable<SeriesTimerInfo>> GetSeriesTimersAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetSeriesTimersAsync called.");
+        logger.LogDebug("GetSeriesTimersAsync called.");
 
         throw new NotImplementedException();
     }
@@ -214,7 +225,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task ResetTuner(string id, CancellationToken cancellationToken)
     {
-        logger.LogInformation("ResetTuner called.");
+        logger.LogDebug("ResetTuner called.");
 
         // not necessary to implement
         return Task.CompletedTask;
@@ -223,7 +234,7 @@ public class LiveTvService : ILiveTvService
     /// <inheritdoc />
     public Task CloseLiveStream(string id, CancellationToken cancellationToken)
     {
-        logger.LogInformation("CloseLiveStream called.");
+        logger.LogDebug("CloseLiveStream called.");
 
         // not necessary to implement
         return Task.CompletedTask;
@@ -232,7 +243,7 @@ public class LiveTvService : ILiveTvService
     // private methods follow
     private async Task<IEnumerable<Uri>> GetStreamPageUrisAsync(Uri listingPageUri, CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetStreamPageUrisAsync called for {0}.", listingPageUri);
+        logger.LogDebug("GetStreamPageUrisAsync called for {0}.", listingPageUri);
 
         using (var httpClient = this.httpClientFactory.CreateClient())
         {
@@ -264,7 +275,7 @@ public class LiveTvService : ILiveTvService
                 }
             }
 
-            logger.LogInformation("GetStreamPageUrisAsync returning: {0}", streamPageUris);
+            logger.LogDebug("GetStreamPageUrisAsync returning: {0}", streamPageUris);
 
             return streamPageUris;
         }
@@ -272,7 +283,7 @@ public class LiveTvService : ILiveTvService
 
     private async Task<TheTvAppChannel> GetTvAppChannelFromStreamPageUriAsync(Uri streamPageUri, CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetTvAppChannelFromStreamPageUriAsync called for {0}.", streamPageUri);
+        logger.LogDebug("GetTvAppChannelFromStreamPageUriAsync called for {0}.", streamPageUri);
 
         using (var httpClient = this.httpClientFactory.CreateClient())
         {
@@ -303,7 +314,7 @@ public class LiveTvService : ILiveTvService
             // the callsign is "WNBCDT1"
             string callsign = hlsUri.Segments[^2].TrimEnd('/');
 
-            string iso8601regex = @"/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)/gm";
+            string iso8601regex = @"\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)";
             string guideRegex = @"https:\/\/thetvapp\.to\/json\/\d+\.json";
 
             Match dateMatch = Regex.Match(streamPageResponse, iso8601regex);
@@ -334,7 +345,7 @@ public class LiveTvService : ILiveTvService
                 var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(guideResponse));
                 using (memoryStream)
                 {
-                    var guideEntries = await JsonSerializer.DeserializeAsync(memoryStream, TvGuideEntry.ThisJsonTypeInfo, cancellationToken).ConfigureAwait(false);
+                    var guideEntries = await JsonSerializer.DeserializeAsync<TvGuideEntry[]>(memoryStream, this.jsonSerializerOptions, cancellationToken).ConfigureAwait(false);
 
                     if (guideEntries == null)
                     {
@@ -342,7 +353,9 @@ public class LiveTvService : ILiveTvService
                         throw new InvalidOperationException("Could not deserialize guide response.");
                     }
 
-                    return new TheTvAppChannel(streamTitle.InnerText, callsign, hlsUri, null, guideEntries);
+                    var title = HttpUtility.HtmlDecode(streamTitle.InnerText ?? "Unknown Title");
+
+                    return new TheTvAppChannel(title, callsign, hlsUri, null, guideEntries);
                 }
             }
             else if (dateMatch.Success)
@@ -357,7 +370,9 @@ public class LiveTvService : ILiveTvService
                     throw new InvalidOperationException("Could not identify stream title.");
                 }
 
-                return new TheTvAppChannel(streamTitle.InnerText, callsign, hlsUri, startTimeUtc, null);
+                var title = HttpUtility.HtmlDecode(streamTitle.InnerText ?? "Unknown Title");
+
+                return new TheTvAppChannel(title, callsign, hlsUri, startTimeUtc, null);
             }
             else
             {
@@ -367,9 +382,9 @@ public class LiveTvService : ILiveTvService
         }
     }
 
-    private async Task<IEnumerable<TheTvAppChannel>> GetTvAppChannelsAsync(CancellationToken cancellationToken)
+    private async Task<IEnumerable<TheTvAppChannel>> FetchNewTvAppChannelsAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("GetTvAppChannelsAsync called.");
+        logger.LogDebug("FetchNewTvAppChannelsAsync called.");
 
         ImmutableArray<string> channelListingStrings =
         [
@@ -389,5 +404,26 @@ public class LiveTvService : ILiveTvService
         // now that we have a list of app channels, if two or more channels declare the same callsign, prefer the one that is NOT marked as a live event
         var appChannelsByCallsign = appChannels.ToLookup(channel => channel.Callsign);
         return appChannelsByCallsign.Select(grouping => grouping.OrderByDescending(channel => channel.AppChannelType).First()).ToList();
+    }
+
+    private async Task<IEnumerable<TheTvAppChannel>> GetTvAppChannelsAsync(CancellationToken cancellationToken)
+    {
+        logger.LogDebug("GetTvAppChannelsAsync called.");
+
+        await this.cacheLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            if (this.tvAppChannels == null || DateTime.UtcNow - this.lastFetchTime > this.cacheDuration)
+            {
+                this.tvAppChannels = await this.FetchNewTvAppChannelsAsync(cancellationToken).ConfigureAwait(false);
+                this.lastFetchTime = DateTime.UtcNow;
+            }
+        }
+        finally
+        {
+            this.cacheLock.Release();
+        }
+
+        return this.tvAppChannels;
     }
 }

@@ -1,3 +1,6 @@
+using System.Linq;
+using Microsoft.Extensions.Logging;
+
 namespace Jellyfin.Plugin.TheTVApp;
 
 using System;
@@ -103,7 +106,7 @@ public class TheTvAppChannel
         return new ChannelInfo
         {
             Name = this.Name,
-            Number = this.Callsign.IdOfString(),
+            Number = this.Callsign,
             Id = this.Callsign,
             TunerChannelId = this.Callsign,
             CallSign = this.Callsign,
@@ -135,129 +138,279 @@ public class TheTvAppChannel
                 Genres = new List<string> { "Live" },
             };
 
-            yield return programInfo;
+            return new List<ProgramInfo>() { programInfo };
         }
         else if (this.GuideEntries != null)
         {
+            var programInfos = new List<ProgramInfo>();
+
             foreach (var guideEntry in this.GuideEntries!)
             {
+                var startTime = DateTimeOffset.FromUnixTimeSeconds(guideEntry.StartTime).UtcDateTime;
+                var endTime = DateTimeOffset.FromUnixTimeSeconds(guideEntry.EndTime).UtcDateTime;
+
                 var programInfo = new ProgramInfo
                 {
-                    Id = (channelInfo.CallSign + guideEntry.StartTime.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)).IdOfString(),
+                    Id = (channelInfo.CallSign + startTime.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)).IdOfString(),
                     ChannelId = channelInfo.Id,
                     Name = guideEntry.Title,
                     EpisodeTitle = guideEntry.EpisodeTitle,
-                    StartDate = DateTimeOffset.FromUnixTimeSeconds(guideEntry.StartTime).UtcDateTime,
-                    EndDate = DateTimeOffset.FromUnixTimeSeconds(guideEntry.EndTime).UtcDateTime,
+                    StartDate = startTime,
+                    EndDate = endTime,
+                    IsLive = true,
                     Genres = new List<string> { "Live" },
                 };
 
-                yield return programInfo;
+                programInfos.Add(programInfo);
             }
+
+            return programInfos;
+        }
+        else
+        {
+            return Array.Empty<ProgramInfo>();
         }
     }
 
     /// <summary>
     /// Returns a collection of <see cref="MediaSourceInfo"/> objects representing the media sources for this channel or sporting event.
     /// </summary>
+    /// <param name="logger"> The logger to use to log messages. </param>
     /// <param name="httpClient"> The HTTP client to use to download the HLS content. </param>
     /// <returns>
     /// The collection.
     /// </returns>
-    public async Task<IEnumerable<MediaSourceInfo>> ToMediaSourceInfosAsync(HttpClient httpClient)
+    public async Task<IEnumerable<MediaSourceInfo>> ToMediaSourceInfosAsync(ILogger<LiveTvService> logger, HttpClient httpClient)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(logger);
 
-        HttpResponseMessage response = await httpClient.GetAsync(this.HlsUri).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        string hlsContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-        // we can expect hlsContent to look something like:
-        //
-        // #EXTM3U
-        // #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=1320000,BANDWIDTH=1650000,RESOLUTION=640x360,FRAME-RATE=59.940,CODECS="avc1.64001f,mp4a.40.2",CLOSED-CAPTIONS=NONE
-        // tracks-v2a1/mono.m3u8?token=OHcwUkwwbllzcVdDZWdGbzRkUExZRnhzQ1R0bEpCVkIwNGZLcExEaw%3D%3D
-        // #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=2860000,BANDWIDTH=3580000,RESOLUTION=1280x720,FRAME-RATE=59.940,CODECS="avc1.4d4028,mp4a.40.2",CLOSED-CAPTIONS=NONE
-        // tracks-v1a1/mono.m3u8?token=OHcwUkwwbllzcVdDZWdGbzRkUExZRnhzQ1R0bEpCVkIwNGZLcExEaw%3D%3D
-        //
-        // each one of the lines starting with #EXT-X-STREAM-INF is a different quality level of the stream, and will be a separate MediaSourceInfo
-        var mediaSourceInfos = new List<MediaSourceInfo>();
-
-        var lines = hlsContent.Split('\n').ToImmutableList();
-
-        using (var enumerator = lines.GetEnumerator())
+        try
         {
-            while (enumerator.MoveNext())
+            logger.LogInformation("Fetching HLS content from {Uri}", this.HlsUri);
+            HttpResponseMessage response = await httpClient.GetAsync(this.HlsUri).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            string hlsContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            var mediaSourceInfos = new List<MediaSourceInfo>();
+            var lines = hlsContent.Split('\n').ToImmutableList();
+
+            logger.LogDebug("Processing {LineCount} lines of HLS content", lines.Count);
+
+            using (var enumerator = lines.GetEnumerator())
             {
-                var line = enumerator.Current;
-
-                if (line.StartsWith("#EXT-X-STREAM-INF", StringComparison.Ordinal))
+                while (enumerator.MoveNext())
                 {
-                    var nextLine = enumerator.MoveNext() ? enumerator.Current : null;
-                    if (nextLine == null)
-                    {
-                        break;
-                    }
+                    var line = enumerator.Current;
 
-                    var infoDict = new Dictionary<string, string>();
-                    foreach (var pair in line.Split(":")[1].Split(','))
+                    if (line.StartsWith("#EXT-X-STREAM-INF", StringComparison.Ordinal))
                     {
-                        var key = pair.Split('=')[0];
-                        var value = pair.Split('=')[1];
-                        infoDict.Add(key, value);
-                    }
-
-                    var mediaSourceInfo = new MediaSourceInfo
-                    {
-                        Protocol = MediaProtocol.Http,
-                        Id = nextLine.IdOfString(),
-                        Path = nextLine,
-                        Name = this.Name,
-                        IsRemote = true,
-                        SupportsProbing = false,
-                        SupportsDirectStream = false,
-                        Container = "mpegts",
-                        RequiresOpening = true,
-                        SupportsTranscoding = true,
-                        MediaStreams = new List<MediaStream>
+                        var nextLine = enumerator.MoveNext() ? enumerator.Current : null;
+                        if (nextLine == null)
                         {
-                            new MediaStream
+                            logger.LogWarning("Found stream info line without corresponding stream URL");
+                            break;
+                        }
+
+                        try
+                        {
+                            var mediaSourceInfo = ParseStreamInfo(line, nextLine, logger);
+                            if (mediaSourceInfo != null)
                             {
-                                Type = MediaStreamType.Video,
-                                IsInterlaced = false,
-
-                                // Set the index to -1 because we don't know the exact index of the video stream within the container
-                                Index = -1,
-
-                                // FRAME-RATE
-                                AverageFrameRate = float.Parse(infoDict["FRAME-RATE"], CultureInfo.InvariantCulture),
-
-                                // RESOLUTION
-                                Width = int.Parse(infoDict["RESOLUTION"].Split('x')[0], CultureInfo.InvariantCulture),
-                                Height = int.Parse(infoDict["RESOLUTION"].Split('x')[1], CultureInfo.InvariantCulture),
-
-                                // CODECS
-                                Codec = infoDict["CODECS"].Split(',')[0],
-                            },
-                            new MediaStream
-                            {
-                                Type = MediaStreamType.Audio,
-
-                                // Set the index to -1 because we don't know the exact index of the audio stream within the container
-                                Index = -1,
-
-                                // CODECS
-                                Codec = infoDict["CODECS"].Split(',')[1],
-                            },
-                        },
-                        Bitrate = int.Parse(infoDict["BANDWIDTH"], CultureInfo.InvariantCulture),
-                    };
-
-                    mediaSourceInfos.Add(mediaSourceInfo);
+                                mediaSourceInfos.Add(mediaSourceInfo);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(ex, "Failed to parse stream info from line: {Line}", line);
+                        }
+                    }
                 }
             }
-        }
 
-        return mediaSourceInfos;
+            if (mediaSourceInfos.Count == 0)
+            {
+                logger.LogWarning("No valid media sources found in HLS content");
+            }
+            else
+            {
+                logger.LogInformation("Successfully parsed {Count} media sources", mediaSourceInfos.Count);
+            }
+
+            return mediaSourceInfos;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "Failed to fetch HLS content from {Uri}", this.HlsUri);
+            throw;
+        }
+    }
+
+    private MediaSourceInfo? ParseStreamInfo(string infoLine, string streamUrl, ILogger logger)
+    {
+        var infoDict = new Dictionary<string, string>();
+
+        try
+        {
+            var infoParts = infoLine.Split(":", 2);
+            if (infoParts.Length != 2)
+            {
+                logger.LogWarning("Invalid stream info format: {Line}", infoLine);
+                return null;
+            }
+
+            foreach (var pair in infoParts[1].Split(','))
+            {
+                var keyValue = pair.Split('=', 2);
+                if (keyValue.Length == 2)
+                {
+                    infoDict[keyValue[0].Trim()] = keyValue[1].Trim(' ', '"');
+                }
+            }
+
+            var mediaStreams = new List<MediaStream>();
+
+            // Add video stream if we can parse the required information
+            if (TryParseVideoStream(infoDict, out var videoStream, logger))
+            {
+                mediaStreams.Add(videoStream);
+            }
+
+            // Add audio stream if we can parse the codec
+            if (TryParseAudioStream(infoDict, out var audioStream, logger))
+            {
+                mediaStreams.Add(audioStream);
+            }
+
+            var mediaSourceInfo = new MediaSourceInfo
+            {
+                Protocol = MediaProtocol.Http,
+                Id = streamUrl.IdOfString(),
+                Path = new Uri(this.HlsUri, streamUrl).ToString(),
+                Name = this.Name,
+                IsRemote = true,
+                SupportsProbing = false,
+                SupportsDirectStream = false,
+                Container = "mpegts",
+                RequiresOpening = true,
+                SupportsTranscoding = true,
+                MediaStreams = mediaStreams,
+            };
+
+            // Try parse bitrate
+            if (infoDict.TryGetValue("BANDWIDTH", out var bandwidthStr))
+            {
+                if (int.TryParse(bandwidthStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var bandwidth))
+                {
+                    mediaSourceInfo.Bitrate = bandwidth;
+                }
+                else
+                {
+                    logger.LogWarning("Failed to parse bandwidth value: {Bandwidth}", bandwidthStr);
+                }
+            }
+
+            return mediaSourceInfo;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error parsing stream info dictionary");
+            return null;
+        }
+    }
+
+    private bool TryParseVideoStream(Dictionary<string, string> infoDict, out MediaStream videoStream, ILogger logger)
+    {
+        videoStream = new MediaStream
+        {
+            Type = MediaStreamType.Video,
+            IsInterlaced = false,
+            Index = -1,
+        };
+
+        try
+        {
+            // Parse frame rate
+            if (infoDict.TryGetValue("FRAME-RATE", out var frameRateStr))
+            {
+                if (float.TryParse(frameRateStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var frameRate))
+                {
+                    videoStream.AverageFrameRate = frameRate;
+                }
+                else
+                {
+                    logger.LogWarning("Failed to parse frame rate: {FrameRate}", frameRateStr);
+                }
+            }
+
+            // Parse resolution
+            if (infoDict.TryGetValue("RESOLUTION", out var resolutionStr))
+            {
+                var dimensions = resolutionStr.Split('x');
+                if (dimensions.Length == 2)
+                {
+                    if (int.TryParse(dimensions[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var width))
+                    {
+                        videoStream.Width = width;
+                    }
+
+                    if (int.TryParse(dimensions[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var height))
+                    {
+                        videoStream.Height = height;
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("Invalid resolution format: {Resolution}", resolutionStr);
+                }
+            }
+
+            // Parse video codec
+            if (infoDict.TryGetValue("CODECS", out var codecsStr))
+            {
+                var codecs = codecsStr.Split(',');
+                if (codecs.Length > 0)
+                {
+                    videoStream.Codec = codecs[0];
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error parsing video stream information");
+            return false;
+        }
+    }
+
+    private bool TryParseAudioStream(Dictionary<string, string> infoDict, out MediaStream audioStream, ILogger logger)
+    {
+        audioStream = new MediaStream
+        {
+            Type = MediaStreamType.Audio,
+            Index = -1,
+        };
+
+        try
+        {
+            if (infoDict.TryGetValue("CODECS", out var codecsStr))
+            {
+                var codecs = codecsStr.Split(',');
+                if (codecs.Length > 1)
+                {
+                    audioStream.Codec = codecs[1];
+                    return true;
+                }
+            }
+
+            logger.LogWarning("No audio codec information found in stream info");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error parsing audio stream information");
+            return false;
+        }
     }
 }

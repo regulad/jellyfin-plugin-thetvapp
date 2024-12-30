@@ -1,2 +1,5 @@
 repository:
-
+  name: jellyfin-plugin-thetvapp
+  description: 📺 A Jellyfin plugin that enables playback of FTA TV channels from TheTVApp service 📡
+  homepage: https://thetvapp.to
+  topics: jellyfin, jellyfin-plugin, iptv, live-tv, streaming, fta, free-to-air, tv-channels, media-server, dotnet, csharp

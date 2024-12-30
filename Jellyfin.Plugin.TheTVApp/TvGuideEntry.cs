@@ -1,19 +1,10 @@
 namespace Jellyfin.Plugin.TheTVApp;
 
-using System;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
-
 /// <summary>
 /// Represents a single entry in the TV guide.
 /// </summary>
 public class TvGuideEntry
 {
-    /// <summary>
-    /// Gets the JSON type info for this class that cam be used to serialize and deserialize objects of this type.
-    /// </summary>
-    public static JsonTypeInfo<TvGuideEntry[]> ThisJsonTypeInfo => JsonTypeInfo.CreateJsonTypeInfo<TvGuideEntry[]>(new JsonSerializerOptions() { PropertyNameCaseInsensitive = true });
-
     /// <summary>
     /// Gets or sets the title of production.
     /// </summary>

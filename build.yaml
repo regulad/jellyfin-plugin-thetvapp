@@ -4,10 +4,9 @@ guid: "9E3DD73A-2282-424D-ADF2-40C86733D02A"
 version: "1.0.0.0"
 targetAbi: "10.9.0.0"
 framework: "net8.0"
-overview: "Short description about your plugin"
+overview: "This plugin enables the channels on TheTVApp to be played on Jellyfin."
 description: >
-  This is a longer description that can span more than one
-  line and include details about your plugin.
+  TheTVApp (https://thetvapp.to) is an aggregation service for FTA (free-to-air; https://en.wikipedia.org/wiki/Free-to-air) TV channels, but the interface on their website leaves much to be desired. This plugin enables the channels on TheTVApp to be played on Jellyfin.
 category: "LiveTV"
 owner: "regulad"
 artifacts:
