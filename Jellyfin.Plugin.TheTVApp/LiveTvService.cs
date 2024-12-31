@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Web;
+using Jellyfin.Plugin.TheTVApp.Timers;
+using MediaBrowser.Controller.Entities.TV;
 
 namespace Jellyfin.Plugin.TheTVApp;
 
@@ -38,10 +40,11 @@ public class LiveTvService : ILiveTvService
     };
 
     // cache
-    private readonly SemaphoreSlim cacheLock = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim channelCacheLock = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim dvrTimerModifyLock = new SemaphoreSlim(1, 1);
     private readonly TimeSpan cacheDuration = TimeSpan.FromMinutes(5);
     private readonly VideoDecryption videoDecryption;
-    private IEnumerable<TheTvAppChannel>? tvAppChannels;
+    private IEnumerable<TheTvAppChannel>? tvAppChannelsCache;
     private DateTime lastFetchTime = DateTime.MinValue;
 
     /// <summary>
@@ -153,59 +156,151 @@ public class LiveTvService : ILiveTvService
 
     /// <inheritdoc />
     // DVR methods follow
-    public Task CancelTimerAsync(string timerId, CancellationToken cancellationToken)
+    public async Task CancelTimerAsync(string timerId, CancellationToken cancellationToken)
     {
         logger.LogDebug("CancelTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.TimerInfos;
+            var maybeTarget = timerInfos.FirstOrDefault(tI => tI.Id == timerId);
+            if (maybeTarget != null)
+            {
+                var mutableTimerInfos = timerInfos.ToList();
+                mutableTimerInfos.Remove(maybeTarget);
+                Plugin.Instance!.Configuration.TimerInfos = mutableTimerInfos.ToImmutableArray();
+            }
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken)
+    public async Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken)
     {
         logger.LogDebug("CancelSeriesTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.SeriesTimerInfos;
+            var maybeTarget = timerInfos.FirstOrDefault(tI => tI.Id == timerId);
+            if (maybeTarget != null)
+            {
+                var mutableTimerInfos = timerInfos.ToList();
+                mutableTimerInfos.Remove(maybeTarget);
+                Plugin.Instance!.Configuration.SeriesTimerInfos = mutableTimerInfos.ToImmutableArray();
+            }
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task CreateTimerAsync(TimerInfo info, CancellationToken cancellationToken)
+    public async Task CreateTimerAsync(TimerInfo info, CancellationToken cancellationToken)
     {
         logger.LogDebug("CreateTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.TimerInfos;
+            var mutableTimerInfos = timerInfos.ToList();
+            mutableTimerInfos.Add(new SerializableTimerInfo(info));
+            Plugin.Instance!.Configuration.TimerInfos = mutableTimerInfos.ToImmutableArray();
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task CreateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
+    public async Task CreateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
     {
         logger.LogDebug("CreateSeriesTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.SeriesTimerInfos;
+            var mutableTimerInfos = timerInfos.ToList();
+            mutableTimerInfos.Add(info);
+            Plugin.Instance!.Configuration.SeriesTimerInfos = mutableTimerInfos.ToImmutableArray();
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task UpdateTimerAsync(TimerInfo updatedTimer, CancellationToken cancellationToken)
+    public async Task UpdateTimerAsync(TimerInfo updatedTimer, CancellationToken cancellationToken)
     {
         logger.LogDebug("UpdateTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.TimerInfos;
+            var maybeTarget = timerInfos.FirstOrDefault(tI => tI.Id == updatedTimer.Id);
+            if (maybeTarget != null)
+            {
+                var mutableTimerInfos = timerInfos.ToList();
+                mutableTimerInfos.Remove(maybeTarget);
+                mutableTimerInfos.Add(new SerializableTimerInfo(updatedTimer));
+                Plugin.Instance!.Configuration.TimerInfos = mutableTimerInfos.ToImmutableArray();
+            }
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task UpdateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
+    public async Task UpdateSeriesTimerAsync(SeriesTimerInfo info, CancellationToken cancellationToken)
     {
         logger.LogDebug("UpdateSeriesTimerAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            var timerInfos = Plugin.Instance!.Configuration.SeriesTimerInfos;
+            var maybeTarget = timerInfos.FirstOrDefault(tI => tI.Id == info.Id);
+            if (maybeTarget != null)
+            {
+                var mutableTimerInfos = timerInfos.ToList();
+                mutableTimerInfos.Remove(maybeTarget);
+                mutableTimerInfos.Add(info);
+                Plugin.Instance!.Configuration.SeriesTimerInfos = mutableTimerInfos.ToImmutableArray();
+            }
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<TimerInfo>> GetTimersAsync(CancellationToken cancellationToken)
+    public async Task<IEnumerable<TimerInfo>> GetTimersAsync(CancellationToken cancellationToken)
     {
         logger.LogDebug("GetTimersAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            return Plugin.Instance!.Configuration.TimerInfos.Select(sTI => sTI.ToTimerInfo());
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -213,15 +308,69 @@ public class LiveTvService : ILiveTvService
     {
         logger.LogDebug("GetNewTimerDefaultsAsync called.");
 
-        throw new NotImplementedException();
+        SeriesTimerInfo seriesTimerInfo;
+
+        // ignore the typing, it is actually nullable
+        if (program == null)
+        {
+            seriesTimerInfo = new SeriesTimerInfo()
+            {
+                Id = Guid.NewGuid().ToString(),
+                RecordAnyTime = true,
+                RecordAnyChannel = false,
+                SkipEpisodesInLibrary = false,
+                RecordNewOnly = false,
+                Priority = default(int),
+                PrePaddingSeconds = 30,
+                PostPaddingSeconds = 30,
+                IsPrePaddingRequired = true,
+                IsPostPaddingRequired = true,
+                ServiceName = "TheTVApp",
+            };
+        }
+        else
+        {
+            seriesTimerInfo = new SeriesTimerInfo()
+            {
+                Id = Guid.NewGuid().ToString(),
+                RecordAnyTime = true,
+                RecordAnyChannel = false,
+                SkipEpisodesInLibrary = false,
+                RecordNewOnly = false,
+                Priority = default(int),
+                PrePaddingSeconds = 30,
+                PostPaddingSeconds = 30,
+                IsPrePaddingRequired = true,
+                IsPostPaddingRequired = true,
+                ServiceName = "TheTVApp",
+
+                ChannelId = program.ChannelId,
+                ProgramId = program.Id,
+                Name = program.Name ?? "Scheduled Programming",
+                Overview = program.Overview ?? program.Name ?? "Scheduled Programming",
+                StartDate = program.StartDate,
+                EndDate = program.EndDate,
+                SeriesId = program.Name?.IdOfString()
+            };
+        }
+
+        return Task.FromResult(seriesTimerInfo);
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<SeriesTimerInfo>> GetSeriesTimersAsync(CancellationToken cancellationToken)
+    public async Task<IEnumerable<SeriesTimerInfo>> GetSeriesTimersAsync(CancellationToken cancellationToken)
     {
         logger.LogDebug("GetSeriesTimersAsync called.");
 
-        throw new NotImplementedException();
+        await this.dvrTimerModifyLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        try
+        {
+            return Plugin.Instance!.Configuration.SeriesTimerInfos;
+        }
+        finally
+        {
+            this.dvrTimerModifyLock.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -428,20 +577,20 @@ public class LiveTvService : ILiveTvService
     {
         logger.LogDebug("GetTvAppChannelsAsync called.");
 
-        await this.cacheLock.WaitAsync(cancellationToken).ConfigureAwait(true);
+        await this.channelCacheLock.WaitAsync(cancellationToken).ConfigureAwait(true);
         try
         {
-            if (this.tvAppChannels == null || DateTime.UtcNow - this.lastFetchTime > this.cacheDuration)
+            if (this.tvAppChannelsCache == null || DateTime.UtcNow - this.lastFetchTime > this.cacheDuration)
             {
-                this.tvAppChannels = await this.FetchNewTvAppChannelsAsync(cancellationToken).ConfigureAwait(false);
+                this.tvAppChannelsCache = await this.FetchNewTvAppChannelsAsync(cancellationToken).ConfigureAwait(false);
                 this.lastFetchTime = DateTime.UtcNow;
             }
         }
         finally
         {
-            this.cacheLock.Release();
+            this.channelCacheLock.Release();
         }
 
-        return this.tvAppChannels;
+        return this.tvAppChannelsCache;
     }
 }
