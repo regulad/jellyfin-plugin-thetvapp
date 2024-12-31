@@ -4,10 +4,13 @@
     <IncludeAssemblies>
       HtmlAgilityPack
       HtmlAgilityPack.CssSelectors.NetCore
+<!--      OpenAI-->
+<!--      System.ClientModel-->
+<!--      System.Diagnostics.DiagnosticSource-->
+<!--      System.Memory.Data-->
+<!--      System.Runtime.CompilerServices.Unsafe-->
+<!--      System.Text.Encodings.Web-->
+<!--      System.Text.Json-->
     </IncludeAssemblies>
-    <DisableCompression>false</DisableCompression>
-    <DisableCleanup>false</DisableCleanup>
-    <LoadAtModuleInit>true</LoadAtModuleInit>
-    <CreateTemporaryAssemblies>true</CreateTemporaryAssemblies>
   </Costura>
 </Weavers>

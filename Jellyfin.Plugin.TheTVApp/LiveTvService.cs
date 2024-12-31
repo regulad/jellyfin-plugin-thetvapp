@@ -40,6 +40,7 @@ public class LiveTvService : ILiveTvService
     // cache
     private readonly SemaphoreSlim cacheLock = new SemaphoreSlim(1, 1);
     private readonly TimeSpan cacheDuration = TimeSpan.FromMinutes(5);
+    private readonly VideoDecryption videoDecryption;
     private IEnumerable<TheTvAppChannel>? tvAppChannels;
     private DateTime lastFetchTime = DateTime.MinValue;
 
@@ -53,6 +54,7 @@ public class LiveTvService : ILiveTvService
     {
         this.httpClientFactory = httpClientFactory;
         this.logger = logger;
+        this.videoDecryption = new VideoDecryption(logger);
 
         this.logger.LogDebug("TheTVApp LiveTvService initialized.");
     }
@@ -294,6 +296,7 @@ public class LiveTvService : ILiveTvService
             HtmlDocument doc = new HtmlDocument();
             doc.LoadHtml(streamPageResponse);
 
+            // get the raw encrypted text
             HtmlNode? encryptedText = doc.QuerySelector("#encrypted-text");
             if (encryptedText == null)
             {
@@ -302,7 +305,22 @@ public class LiveTvService : ILiveTvService
             }
 
             string encryptedTextValue = encryptedText.Attributes["data"].Value;
-            Uri? hlsUri = VideoDecryption.DecryptVideoUrl(encryptedTextValue);
+
+            // because the key changes, we need to fetch the script and use it to decrypt the video URL
+            HtmlNode? jsScriptElement = doc.QuerySelector("script[type='module']");
+            if (jsScriptElement == null)
+            {
+                logger.LogError("Could not identify script element on stream page {0}.", streamPageUri);
+                throw new InvalidOperationException("Could not identify script element.");
+            }
+
+            string jsScriptSourceUrl = jsScriptElement.Attributes["src"].Value;
+
+            HttpResponseMessage jsScriptHttpResponseMessage = await httpClient.GetAsync(jsScriptSourceUrl, cancellationToken).ConfigureAwait(false);
+            jsScriptHttpResponseMessage.EnsureSuccessStatusCode();
+            string rawObfuscatedJsScriptResponse = await jsScriptHttpResponseMessage.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            Uri? hlsUri = await this.videoDecryption.DecryptVideoUrl(encryptedTextValue, rawObfuscatedJsScriptResponse, cancellationToken).ConfigureAwait(false);
 
             if (hlsUri == null)
             {
@@ -396,10 +414,10 @@ public class LiveTvService : ILiveTvService
             "https://thetvapp.to/ncaaf",
         ];
         var channelListingUris = channelListingStrings.Select(s => new Uri(s)).ToList();
-        var channelListingStreamPageUris = await Task.WhenAll(channelListingUris.Select(uri => this.GetStreamPageUrisAsync(uri, cancellationToken))).ConfigureAwait(false);
+        var channelListingStreamPageUris = await TaskExtensions.WhenAllSuccessful(channelListingUris.Select(uri => this.GetStreamPageUrisAsync(uri, cancellationToken)), task => { logger.LogWarning("Could not parse a listing page, continuing anyway.\n{0}", task.Exception!.GetBaseException().ToString()); }).ConfigureAwait(false);
         var channelStreamPageUris = channelListingStreamPageUris.SelectMany(enumerable => enumerable).ToList();
 
-        var appChannels = await Task.WhenAll(channelStreamPageUris.Select(uri => this.GetTvAppChannelFromStreamPageUriAsync(uri, cancellationToken))).ConfigureAwait(false);
+        var appChannels = await TaskExtensions.WhenAllSuccessful(channelStreamPageUris.Select(uri => this.GetTvAppChannelFromStreamPageUriAsync(uri, cancellationToken)), task => { logger.LogWarning("Could not parse a streaming page, continuing anyway.\n{0}", task.Exception!.GetBaseException().ToString()); }).ConfigureAwait(false);
 
         // now that we have a list of app channels, if two or more channels declare the same callsign, prefer the one that is NOT marked as a live event
         var appChannelsByCallsign = appChannels.ToLookup(channel => channel.Callsign);

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using Jellyfin.Plugin.Template.Configuration;
+using Jellyfin.Plugin.TheTVApp.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.TheTVApp;
 /// <summary>
 /// The main plugin.
 /// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>
+public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -25,14 +25,27 @@ public class Plugin : BasePlugin<PluginConfiguration>
         Instance = this;
     }
 
+    /// <inheritdoc />
+    public override string Name => "TheTVApp";
+
+    /// <inheritdoc />
+    public override Guid Id => Guid.Parse("9E3DD73A-2282-424D-ADF2-40C86733D02A");
+
     /// <summary>
     /// Gets the current plugin instance.
     /// </summary>
     public static Plugin? Instance { get; private set; }
 
     /// <inheritdoc />
-    public override string Name => "TheTVApp";
-
-    /// <inheritdoc />
-    public override Guid Id => Guid.Parse("9E3DD73A-2282-424D-ADF2-40C86733D02A");
+    public IEnumerable<PluginPageInfo> GetPages()
+    {
+        return
+        [
+            new PluginPageInfo
+            {
+                Name = Name,
+                EmbeddedResourcePath = string.Format(CultureInfo.InvariantCulture, "{0}.Configuration.configPage.html", GetType().Namespace)
+            }
+        ];
+    }
 }

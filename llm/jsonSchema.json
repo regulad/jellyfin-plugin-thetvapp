@@ -1,0 +1,39 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": [
+        "part1",
+        "part2",
+        "part3"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "part1": {
+            "type": [
+                "array",
+                "null"
+            ],
+            "items": {
+                "type": "integer",
+                "description": "Character codes for the first part of the key"
+            }
+        },
+        "part2": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Base64 encoded string that forms the second part of the key"
+        },
+        "part3": {
+            "type": [
+                "array",
+                "null"
+            ],
+            "items": {
+                "type": "integer",
+                "description": "Character codes for the third part of the key"
+            }
+        }
+    }
+}

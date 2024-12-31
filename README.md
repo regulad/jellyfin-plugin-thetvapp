@@ -18,9 +18,36 @@ dotnet build --configuration Release
 
 The plugin will be output to `Jellyfin.Plugin.TheTVApp/bin/Release/net8.0/Jellyfin.Plugin.TheTVApp.dll`.
 
-Simply put this plugin in `/config/plugins/thetvapp` and restart Jellyfin. Jellyfin will take care of the rest.
+## Installation
 
-Tested on Jellyfin 10.10.3,
+If you built the plugin yourself, use the `dll` file(s) you generated. If you didn't, download the latest nightly build [here](https://nightly.link/regulad/jellyfin-plugin-thetvapp/workflows/build.yaml/master/build-artifact.zip).
+
+The files needed are:
+
+- `Jellyfin.Plugin.TheTVApp.dll`
+- `OpenAI.dll`
+- `System.Memory.Data.dll`
+- `System.ClientModel.dll`
+
+- Put the files in `/config/plugins/thetvapp` (or the directory for your installation method) and restart Jellyfin. Jellyfin will take care of the rest.
+
+Tested on Jellyfin 10.10.3.
+
+## Setup
+
+This plugin requires a little bit of configuration. To pick up channels, the plugin needs an OpenAI API key so it can deobfuscate the encryption key for the HLS streams.
+
+It uses the typical configuration flow for a plugin.
+
+To get the key, go to [OpenAI's API website](https://platform.openai.com/docs/overview) and sign up for a key.
+
+## Challenges
+
+TheTVApp encrypts their HLS Stream URLs with a custom Vigenère-like cipher, but the key itself is obfuscated in the client-side JavaScript.
+
+There's no easy way to write a program that can extract the key from the JavaScript, so instead we use an LLM with a finely tuned system prompt to extract the key.
+
+You can see the system prompt [here](llm/prompt.md) and my reverse engineering journal [here](re/README.md).
 
 ## License
 

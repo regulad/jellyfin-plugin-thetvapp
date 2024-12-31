@@ -12,4 +12,4 @@ owner: "regulad"
 artifacts:
 - "Jellyfin.Plugin.TheTVApp.dll"
 changelog: >
-  changelog
+  Add LLM-based deobfuscation.

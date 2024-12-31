@@ -1,6 +1,8 @@
 # ThatTVApp Reverse Engineering Log
 
-## 1. Listing Pages
+## Page Types
+
+### 1. Listing Pages
 
 The ThatTVApp website is a web application that sources FTA TV channels from around the US. It exposes a central webpage for "Live TV," as well as each of the "Big 4" sports leagues (NFL, NBA, MLB, NHL) in the US, and college football.
 
@@ -13,7 +15,7 @@ This makes the 5 listing pages:
 - NHL: https://thetvapp.to/nhl
 - NCAAF: https://thetvapp.to/ncaaf
 
-### Included Data
+#### Included Data
 
 <details>
 <summary>HTML</summary>
@@ -264,11 +266,11 @@ In the case where no channels are available, this list will contain a single `p`
 
 If there are channels, each channel is represented by an `a` element. The `href` of this element points to something called a **Streaming Page**
 
-## 2. Streaming Pages
+### 2. Streaming Pages
 
 This page basically just bootstraps a JWPlayer instance with a video source that is encrypted. The video source is decrypted by the client-side JavaScript.
 
-### Included Data
+#### Included Data
 
 For regular TV channels, the page contains three things:
 
@@ -889,7 +891,7 @@ For live events like sporting events, the page contains three things:
 
 **The two types of channels can be discriminated pretty easily by checking to see if the TV guide regex hits or if the start time regex hits.**
 
-### Analysis & Decryption
+#### Analysis & Decryption
 
 The "encrypted text" looks like this: `vGV0zLG6Db92XYNafNczyGDegBSxoL8wgIeuZ0AEVTJtvF9agnXnlX5hH3T4T3Ozu2NxAZ9JE3fCv3r3TlbpigFZKJSgX2YCMioWx1ZZwIaXcsj6BOTNLKGJwWQHf0m3ZmkvHBMJbIPzgk09`.
 
@@ -899,7 +901,7 @@ This `m3u8` playlist can be pretty easily streamed by a client like VLC or trans
 
 To get the TV guide, we can just make a GET request to the JSON URL and parse the response.
 
-## 3. TV Guide JSON
+### 3. TV Guide JSON
 
 The structure of the TV guide is pretty simple: it's just a JSON list with a 1D object.
 
@@ -916,3 +918,11 @@ The structure of the TV guide is pretty simple: it's just a JSON list with a 1D 
 ]
 ```
 The `startTime` and `endTime` are Unix timestamps.
+
+## Key Rotation
+
+Every day, the parent HTML page will be updated with a new JS file that contains a new decryption key.
+
+Although it is obfuscated using `javascript-obfuscator` (a.k.a. `obfuscator.io), a well documented obfuscation engine, it is not possible to extract the key using exclusively static analysis (i.e. deobfuscation attempts).
+
+However, we live in the era of AI! Any LLM with a wide enough context window can extract the key fairly easily. In the `llm/` folder, you will see the JSON schema and system prompt I use to extract the key from the JavaScript.
