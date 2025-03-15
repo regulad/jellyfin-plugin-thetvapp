@@ -1,5 +1,7 @@
 # TheTVApp for Jellyfin
 
+##### NOTICE: TheTVApp now publishes an M3U url for their FTA streams, making this plugin obselete. Try it here: https://tvpass.org/playlist/m3u
+
 _My first C# project!_
 
 ![Screenshot 2024-12-29 at 11.30.02 PM.png](screenshots/Screenshot%202024-12-29%20at%2011.30.02%E2%80%AFPM.png)
